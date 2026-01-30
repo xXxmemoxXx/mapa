@@ -3,37 +3,41 @@ from streamlit_folium import st_folium
 import folium
 from folium.plugins import Fullscreen, LocateControl
 import mysql.connector
-import psycopg2
-import json
-import base64
 import pandas as pd
+import base64
 from datetime import datetime
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="MIAA - Monitoreo de Pozos", layout="wide")
+st.set_page_config(page_title="MIAA - Sistema de Monitoreo", layout="wide")
 
-# Estilo visual idéntico a tu Tkinter (#0b1a29)
+# CSS para mantener tu identidad visual oscura
 st.markdown("""
     <style>
     .stApp { background-color: #0b1a29; color: white; }
-    .stButton>button { background-color: #00CED1; color: #0b1a29; font-weight: bold; width: 100%; border-radius: 8px; }
-    .console-text { background-color: #0c0c0c; color: #00ff00; padding: 15px; font-family: 'Consolas', monospace; border-radius: 5px; height: 200px; overflow-y: auto; font-size: 13px; border: 1px solid #333; }
+    .stButton>button { 
+        background-color: #00CED1 !important; color: #0b1a29 !important; 
+        font-weight: bold; width: 100%; height: 3em; border-radius: 8px;
+    }
+    .console-box {
+        background-color: #0c0c0c; color: #00ff00; padding: 15px;
+        font-family: 'Consolas', monospace; border-radius: 5px;
+        height: 200px; overflow-y: auto; border: 1px solid #333;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- TUS CONFIGURACIONES ORIGINALES ---
+# --- CREDENCIALES (TAL CUAL TU ARCHIVO) ---
 config = {'user': 'miaamx_dashboard', 'password': 'h97_p,NQPo=l', 'host': 'miaa.mx', 'database': 'miaamx_telemetria'}
-config_posgres = {'user': 'map_tecnica', 'password': 'M144.Tec', 'host': 'ti.miaa.mx', 'database': 'qgis'}
 
-# --- COPIA AQUÍ TUS DICCIONARIOS COMPLETOS DE RESPALDO 2 ---
+# --- TUS DICCIONARIOS (Copia aquí tus 200+ pozos del respaldo) ---
 mapa_pozos_dict = {
     "P002": {"coord": (21.88229, -102.31542), "caudal": "PZ_002_TRC_CAU_INS"},
     "P003": {"coord": (21.88603, -102.26653), "caudal": "PZ_003_CAU_INS"},
-    # ... PEGA EL RESTO DE TUS 200+ POZOS AQUÍ ...
+    # PEGA AQUÍ EL RESTO...
 }
 
-# --- LÓGICA DE DATOS ---
-def obtener_datos():
+# --- MOTOR DE DATOS ---
+def obtener_caudales_reales():
     try:
         conn = mysql.connector.connect(**config)
         cursor = conn.cursor()
@@ -46,49 +50,38 @@ def obtener_datos():
         return res
     except: return {}
 
-# --- INTERFAZ PRINCIPAL ---
-st.title("🛰️ SISTEMA DE MONITOREO MIAA")
+# --- INTERFAZ ---
+st.title("🛰️ MONITOREO TÉCNICO MIAA")
 
-col_btn, col_empty = st.columns([1, 2])
-with col_btn:
-    # Este es el botón de tu interfaz original
-    ejecutar = st.button("🚀 INICIAR MONITOREO DE MAPA")
+# Botón de Inicio
+if st.button("🚀 INICIAR MONITOREO DE MAPA"):
+    # 1. Crear el Mapa
+    m = folium.Map(location=[21.8818, -102.2917], zoom_start=12, tiles="cartodbpositron")
+    Fullscreen().add_to(m)
+    LocateControl().add_to(m)
 
-# Contenedor del Mapa
-if ejecutar:
-    with st.spinner("Consultando ingeniería y renderizando mapa..."):
-        # 1. Crear el mapa base
-        m = folium.Map(location=[21.8818, -102.2917], zoom_start=12, tiles="cartodbpositron")
-        Fullscreen().add_to(m)
-        LocateControl().add_to(m)
+    # 2. Tu lógica de ingeniería para pintar pozos
+    datos = obtener_caudales_reales()
+    for id_p, info in mapa_pozos_dict.items():
+        val = datos.get(info["caudal"], 0.0)
+        color_p = "#00CED1" if val > 0.5 else "#FF4B4B"
+        folium.CircleMarker(
+            location=info["coord"], radius=8, color=color_p, fill=True,
+            popup=f"<b>{id_p}</b><br>Caudal: {val} l/s"
+        ).add_to(m)
 
-        # 2. Tu lógica de marcado y colores (Azul si > 0.5, Rojo si no)
-        datos = obtener_datos()
-        for id_p, info in mapa_pozos_dict.items():
-            val = datos.get(info["caudal"], 0.0)
-            color_p = "#00CED1" if val > 0.5 else "#FF4B4B"
-            folium.CircleMarker(
-                location=info["coord"], radius=8, color=color_p, fill=True,
-                popup=f"<b>{id_p}</b><br>Caudal: {val} l/s"
-            ).add_to(m)
+    # 3. MOSTRAR EL MAPA EN PANTALLA (Aquí es donde se ve el mapa)
+    st_folium(m, width="100%", height=600)
+    
+    # 4. Opción para descargar/abrir HTML
+    m.save("mapa_miaa.html")
+    st.success("Mapa renderizado con éxito.")
 
-        # 3. Mostrar el mapa directamente en la web
-        st_folium(m, width="100%", height=600)
-        
-        # 4. Botón opcional para abrir en pestaña nueva (como pedías)
-        ruta_temp = "mapa_miaa.html"
-        m.save(ruta_temp)
-        with open(ruta_temp, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        
-        st.markdown(f'<a href="data:text/html;base64,{b64}" target="_blank" style="text-decoration:none;"><div style="background-color:#00CED1;color:#0b1a29;padding:10px;border-radius:5px;text-align:center;font-weight:bold;">ABRIR EN PESTAÑA COMPLETA</div></a>', unsafe_allow_html=True)
-
-# --- CONSOLA (Registro de eventos) ---
+# --- CONSOLA ---
 st.write("### 📜 Registro de Eventos")
 st.markdown(f"""
-    <div class="console-text">
-    [{datetime.now().strftime('%H:%M:%S')}] ✅ Sistema Web MIAA cargado.<br>
-    [{datetime.now().strftime('%H:%M:%S')}] [DB] Conectado a Pozos: miaa.mx<br>
-    [{datetime.now().strftime('%H:%M:%S')}] [GIS] Conectado a Sectores: ti.miaa.mx
+    <div class="console-box">
+    [{datetime.now().strftime('%H:%M:%S')}] ✅ Sistema Web Listo.<br>
+    [{datetime.now().strftime('%H:%M:%S')}] Esperando clic en el botón para mostrar el mapa interactivo...
     </div>
 """, unsafe_allow_html=True)
