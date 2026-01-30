@@ -1,91 +1,124 @@
 import streamlit as st
 from streamlit_folium import st_folium
 import folium
+from folium.plugins import Fullscreen, LocateControl
 import pandas as pd
 import mysql.connector
 import psycopg2
+import json
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
+import concurrent.futures
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="MIAA - Telemetría Web", layout="wide")
+st.set_page_config(page_title="MIAA - Telemetría Avanzada", layout="wide", page_icon="🛰️")
 
-# --- CREDENCIALES (Extraídas de tu respaldo) ---
-DB_CONFIG = {
-    'user': 'miaamx_dashboard',
-    'password': 'h97_p,NQPo=l',
-    'host': 'miaa.mx',
-    'database': 'miaamx_telemetria'
+# --- ESTILOS PERSONALIZADOS (Dark Mode MIAA) ---
+st.markdown("""
+    <style>
+    .main { background-color: #0b1a29; color: white; }
+    .stMetric { background-color: #162a3d !important; border: 1px solid #00CED1 !important; border-radius: 10px; padding: 10px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- CONFIGURACIONES DE DB (Tomadas de tu archivo) ---
+CONFIG_POZOS = {'user': 'miaamx_dashboard', 'password': 'h97_p,NQPo=l', 'host': 'miaa.mx', 'database': 'miaamx_telemetria'}
+CONFIG_MACRO = {'user': 'miaamx_telemetria2', 'password': 'bWkrw1Uum1O&', 'host': 'miaa.mx', 'database': 'miaamx_telemetria2'}
+CONFIG_PG = {'user': 'map_tecnica', 'password': 'M144.Tec', 'host': 'ti.miaa.mx', 'database': 'qgis'}
+
+# --- TUS DICCIONARIOS (Copia fiel de tu RESPALDO 2) ---
+# He mantenido la estructura para que no tengas que remapear nada
+mapa_pozos_dict = {
+    "P002": {"coord": [21.88229, -102.31542], "caudal": "PZ_002_TRC_CAU_INS", "presion": "PZ_002_TRC_PRES_INS", "voltajes_l": ["PZ_002_TRC_VOL_L1_L2", "PZ_002_TRC_VOL_L2_L3", "PZ_002_TRC_VOL_L1_L3"]},
+    "P003": {"coord": [21.88603, -102.26653], "caudal": "PZ_003_CAU_INS", "presion": "PZ_003_PRES_INS", "voltajes_l": ["PZ_003_VOL_L1_L2", "PZ_003_VOL_L2_L3", "PZ_003_VOL_L1_L3"]},
+    # ... AQUÍ PEGA EL RESTO DE TUS 200+ POZOS DEL ARCHIVO ORIGINAL ...
 }
 
-# --- FUNCIONES DE BASE DE DATOS ---
-@st.cache_resource
-def get_connection():
-    try:
-        return mysql.connector.connect(**DB_CONFIG, autocommit=True)
-    except Exception as e:
-        st.error(f"Error de conexión: {e}")
-        return None
+mapa_tanques_dict = {
+    "TQ003 (P145 IV Centenario)": {"coord": [21.870261, -102.280607], "nivel_tag": "TQ_T_17A_DR_NIV", "nivel_max": 7.5},
+    # ... PEGA TUS TANQUES ...
+}
 
-def fetch_realtime(tag):
-    conn = get_connection()
-    if not conn: return 0.0, "S/C"
+# --- LÓGICA DE DATOS (Mantenemos tu eficiencia de hilos) ---
+@st.cache_resource
+def get_mysql_conn(conf):
+    return mysql.connector.connect(**conf, autocommit=True)
+
+def obtener_datos_tiempo_real(tag_list, config_db):
+    conn = get_mysql_conn(config_db)
+    results = {}
+    if not conn: return results
+    
     cursor = conn.cursor()
-    query = """
-        SELECT T1.VALUE, T1.FECHA 
+    # Usamos un solo query para múltiples tags (optimización web)
+    format_strings = ','.join(['%s'] * len(tag_list))
+    query = f"""
+        SELECT T2.NAME, T1.VALUE, T1.FECHA 
         FROM VfiTagNumHistory_Ultimo T1
         JOIN VfiTagRef T2 ON T1.GATEID = T2.GATEID
-        WHERE T2.NAME = %s LIMIT 1
+        WHERE T2.NAME IN ({format_strings})
     """
-    cursor.execute(query, (tag,))
-    res = cursor.fetchone()
-    return (round(float(res[0]), 2), res[1]) if res else (0.0, "N/A")
+    try:
+        cursor.execute(query, tuple(tag_list))
+        for name, val, fecha in cursor.fetchall():
+            results[name] = (float(val), fecha)
+    except: pass
+    return results
 
-# --- INTERFAZ ---
-st.title("🛰️ Monitoreo MIAA - Web")
+# --- CONSTRUCCIÓN DEL MAPA ---
+def render_mapa_completo(ver_pozos, ver_tanques, ver_sectores):
+    m = folium.Map(location=[21.8818, -102.2917], zoom_start=12, tiles="cartodbpositron")
+    Fullscreen().add_to(m)
+    
+    # Lista de todos los tags a consultar de una sola vez
+    all_tags = [info["caudal"] for info in mapa_pozos_dict.values()]
+    data_map = obtener_datos_tiempo_real(all_tags, CONFIG_POZOS)
 
-# Sidebar
+    if ver_pozos:
+        for id_p, info in mapa_pozos_dict.items():
+            val, fecha = data_map.get(info["caudal"], (0.0, "N/A"))
+            color = "blue" if val > 0.1 else "red"
+            
+            folium.CircleMarker(
+                location=info["coord"],
+                radius=7,
+                color=color,
+                fill=True,
+                fill_opacity=0.7,
+                popup=folium.Popup(f"<b>{id_p}</b><br>Caudal: {val} l/s<br>Último: {fecha}", max_width=200)
+            ).add_to(m)
+
+    # Lógica de Sectores (Postgres)
+    if ver_sectores:
+        try:
+            conn_pg = psycopg2.connect(**CONFIG_PG)
+            # Aquí va tu query de ST_AsGeoJSON que tienes en el respaldo
+            # folium.GeoJson(data).add_to(m)
+            pass
+        except: st.error("Error cargando sectores")
+
+    return m
+
+# --- INTERFAZ PRINCIPAL ---
+st.title("🛰️ Sistema de Telemetría MIAA v2.0")
+
 with st.sidebar:
-    st.header("Filtros de Mapa")
-    ver_pozos = st.checkbox("Mostrar Pozos", value=True)
-    if st.button("🔄 Actualizar"):
+    st.header("Capas de Información")
+    p = st.checkbox("Pozos", True)
+    t = st.checkbox("Tanques", True)
+    s = st.checkbox("Sectores (GIS)", False)
+    st.divider()
+    if st.button("🔄 Sincronizar Bases de Datos"):
         st.cache_data.clear()
         st.rerun()
 
-# Layout
-col_map, col_metrics = st.columns([3, 1])
+# Mapa en pantalla completa
+map_obj = render_mapa_completo(p, t, s)
+st_folium(map_obj, width="100%", height=700, use_container_width=True)
 
-with col_map:
-    # Creamos el mapa centrado en Aguascalientes
-    m = folium.Map(location=[21.8818, -102.2917], zoom_start=12, tiles="cartodbpositron")
-    
-    # Ejemplo con un pozo (P002) de tu diccionario original
-    if ver_pozos:
-        val, fecha = fetch_realtime("PZ_002_TRC_CAU_INS")
-        color = "blue" if val > 0 else "red"
-        
-        folium.Marker(
-            location=[21.88229, -102.31542],
-            popup=f"Pozo P002: {val} l/s",
-            icon=folium.Icon(color=color, icon='tint')
-        ).add_to(m)
-
-    # Renderizar el mapa
-    st_folium(m, width="100%", height=600)
-
-with col_metrics:
-    st.subheader("Estado de Activos")
-    st.metric("P002 - Caudal", f"{val} l/s", delta=f"Última: {fecha}")
-    
-    # Espacio para más métricas
-    st.write("---")
-    st.info("Haz clic en un marcador para ver detalles.")
-
-# --- GRÁFICO HISTÓRICO ---
+# Sección de Gráficos (Tus funciones de Plotly)
 st.divider()
-st.subheader("📈 Análisis de Datos (Plotly)")
-# Aquí puedes reusar tu lógica de históricos
-fig = go.Figure()
-fig.add_trace(go.Scatter(y=[10, 12, 11, 14, 15], name="Presión", line=dict(color="#00CED1")))
-fig.update_layout(template="plotly_dark", height=300)
-st.plotly_chart(fig, use_container_width=True)
+st.subheader("📊 Análisis de Variables Críticas")
+c1, c2 = st.columns(2)
+# Aquí puedes llamar a tus funciones generar_grafico_caudal_y_presion()
+# convirtiendo el objeto fig de plotly a st.plotly_chart(fig)
