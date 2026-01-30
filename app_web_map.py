@@ -5,100 +5,130 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="MIAA - Análisis de Pozos", layout="wide")
+st.set_page_config(page_title="MIAA - Análisis Técnico", layout="wide")
 
-# Estilo visual original (#0b1a29)
+# Estilo visual de tu proyecto original
 st.markdown("""
     <style>
     .stApp { background-color: #0b1a29; color: white; }
-    .stSelectbox label { color: #00CED1 !important; font-weight: bold; }
+    .stSelectbox label { color: #00CED1 !important; font-size: 18px; }
+    h3 { color: #00CED1; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- CREDENCIALES ---
-config = {'user': 'miaamx_dashboard', 'password': 'h97_p,NQPo=l', 'host': 'miaa.mx', 'database': 'miaamx_telemetria'}
+# --- CREDENCIALES (Respaldo 2) ---
+config = {
+    'user': 'miaamx_dashboard',
+    'password': 'h97_p,NQPo=l',
+    'host': 'miaa.mx',
+    'database': 'miaamx_telemetria'
+}
 
-# --- DICCIONARIO DE POZOS (Extraído de tu Respaldo 2) ---
-# Aquí solo pongo una muestra, pega aquí tu mapa_pozos_dict completo.
+# --- COPIA AQUÍ TU DICCIONARIO COMPLETO (mapa_pozos_dict) ---
+# He incluido estos de ejemplo con la estructura de tu archivo
 mapa_pozos_dict = {
     "P002": {
         "caudal": "PZ_002_TRC_CAU_INS", 
         "presion": "PZ_002_TRC_PRES_INS",
-        "voltajes": ["PZ_002_TRC_VOL_L1_L2", "PZ_002_TRC_VOL_L2_L3", "PZ_002_TRC_VOL_L1_L3"],
-        "corrientes": ["PZ_002_TRC_AMP_L1", "PZ_002_TRC_AMP_L2", "PZ_002_TRC_AMP_L3"]
+        "voltajes": ["PZ_002_TRC_VOL_L1_L2", "PZ_002_TRC_VOL_L2_L3", "PZ_002_TRC_VOL_L1_L3"]
     },
     "P003": {
         "caudal": "PZ_003_CAU_INS", 
         "presion": "PZ_003_PRES_INS",
-        "voltajes": ["PZ_003_VOL_L1_L2", "PZ_003_VOL_L2_L3", "PZ_003_VOL_L1_L3"],
-        "corrientes": ["PZ_003_AMP_L1", "PZ_003_AMP_L2", "PZ_003_AMP_L3"]
+        "voltajes": ["PZ_003_VOL_L1_L2", "PZ_003_VOL_L2_L3", "PZ_003_VOL_L1_L3"]
     }
 }
 
-# --- MOTOR DE CONSULTA HISTÓRICA ---
-def obtener_historico_pozo(pozo_id):
+# --- MOTOR DE DATOS (Consulta Robusta) ---
+def obtener_datos_pozo(pozo_id):
     info = mapa_pozos_dict[pozo_id]
-    tags = [info["caudal"], info["presion"]] + info["voltajes"] + info["corrientes"]
+    all_tags = [info["caudal"], info["presion"]] + info.get("voltajes", [])
     
     try:
         conn = mysql.connector.connect(**config)
         cursor = conn.cursor()
-        format_strings = ','.join(['%s'] * len(tags))
-        fecha_inicio = datetime.now() - timedelta(days=7)
         
+        # Consultamos los últimos 5 días para no saturar, pero asegurar datos
+        fecha_limite = datetime.now() - timedelta(days=5)
+        
+        format_strings = ','.join(['%s'] * len(all_tags))
         query = f"""
-            SELECT FECHA, T2.NAME, T1.VALUE 
+            SELECT T1.FECHA, T2.NAME, T1.VALUE 
             FROM VfiTagNumHistory T1
             JOIN VfiTagRef T2 ON T1.GATEID = T2.GATEID
-            WHERE T2.NAME IN ({format_strings}) AND T1.FECHA >= %s
+            WHERE T2.NAME IN ({format_strings}) 
+            AND T1.FECHA >= %s
             ORDER BY T1.FECHA ASC
         """
-        cursor.execute(query, (fecha_inicio,))
-        data = cursor.fetchall()
-        conn.close()
         
-        df = pd.DataFrame(data, columns=['FECHA', 'Variable', 'Valor'])
-        return df.pivot(index='FECHA', columns='Variable', values='Valor').reset_index()
+        cursor.execute(query, tuple(all_tags + [fecha_limite]))
+        records = cursor.fetchall()
+        conn.close()
+
+        if not records:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(records, columns=['FECHA', 'TAG', 'VALUE'])
+        # Pivotar para tener una columna por cada variable
+        df_pivot = df.pivot_table(index='FECHA', columns='TAG', values='VALUE').reset_index()
+        return df_pivot
+
     except Exception as e:
-        st.error(f"Error en DB: {e}")
+        st.error(f"Error de conexión: {e}")
         return pd.DataFrame()
 
-# --- INTERFAZ DE SELECCIÓN ---
-st.title("📊 Análisis Técnico de Pozos")
+# --- INTERFAZ ---
+st.title("🛰️ Panel de Información de Pozos")
 
-with st.sidebar:
-    st.header("Listado de Pozos")
-    pozo_seleccionado = st.selectbox("Seleccione un pozo para ver información:", list(mapa_pozos_dict.keys()))
+# Listado de Pozos
+pozo_sel = st.selectbox("Seleccione un Pozo del Listado:", list(mapa_pozos_dict.keys()))
 
-if pozo_seleccionado:
-    st.subheader(f"Histórico de Variables: {pozo_seleccionado}")
-    
-    with st.spinner("Consultando datos históricos..."):
-        df = obtener_historico_pozo(pozo_seleccionado)
+if pozo_sel:
+    st.divider()
+    with st.spinner(f"Extrayendo información histórica de {pozo_sel}..."):
+        df_final = obtener_datos_pozo(pozo_sel)
         
-        if not df.empty:
-            info = mapa_pozos_dict[pozo_seleccionado]
+        if not df_final.empty:
+            tags_p = mapa_pozos_dict[pozo_sel]
             
-            # --- GRÁFICA 1: CAUDAL Y PRESIÓN ---
-            fig1 = go.Figure()
-            fig1.add_trace(go.Scatter(x=df['FECHA'], y=df[info["caudal"]], name="Caudal (l/s)", line=dict(color='#00CED1')))
-            fig1.add_trace(go.Scatter(x=df['FECHA'], y=df[info["presion"]], name="Presión (kg/cm²)", line=dict(color='#FF8C00'), yaxis="y2"))
+            # Gráfica de Caudal y Presión (Ejes combinados)
+            fig = go.Figure()
             
-            fig1.update_layout(
-                template="plotly_dark", title="Caudal vs Presión",
-                yaxis=dict(title="Caudal (l/s)", titlefont=dict(color="#00CED1"), tickfont=dict(color="#00CED1")),
-                yaxis2=dict(title="Presión (kg/cm²)", overlaying='y', side='right', titlefont=dict(color="#FF8C00"), tickfont=dict(color="#FF8C00"))
-            )
-            st.plotly_chart(fig1, use_container_width=True)
+            # Caudal (Cian)
+            if tags_p["caudal"] in df_final.columns:
+                fig.add_trace(go.Scatter(
+                    x=df_final['FECHA'], y=df_final[tags_p["caudal"]],
+                    name="Caudal (l/s)", line=dict(color='#00CED1', width=2)
+                ))
+            
+            # Presión (Naranja)
+            if tags_p["presion"] in df_final.columns:
+                fig.add_trace(go.Scatter(
+                    x=df_final['FECHA'], y=df_final[tags_p["presion"]],
+                    name="Presión (kg/cm²)", line=dict(color='#FF8C00', width=2),
+                    yaxis="y2"
+                ))
 
-            # --- GRÁFICA 2: ELÉCTRICOS (VOLTAJES) ---
-            fig2 = go.Figure()
-            for v_tag in info["voltajes"]:
-                if v_tag in df.columns:
-                    fig2.add_trace(go.Scatter(x=df['FECHA'], y=df[v_tag], name=v_tag.split('_')[-2:]))
+            fig.update_layout(
+                title=f"Comportamiento Hidráulico - {pozo_sel}",
+                template="plotly_dark",
+                hovermode="x unified",
+                yaxis=dict(title="Caudal (l/s)", titlefont=dict(color="#00CED1"), tickfont=dict(color="#00CED1")),
+                yaxis2=dict(title="Presión (kg/cm²)", overlaying='y', side='right', titlefont=dict(color="#FF8C00"), tickfont=dict(color="#FF8C00")),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
             
-            fig2.update_layout(template="plotly_dark", title="Monitoreo Eléctrico (Voltajes L-L)", yaxis_title="Voltios (V)")
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
             
+            # Gráfica de Voltajes (Si existen)
+            if "voltajes" in tags_p:
+                fig_v = go.Figure()
+                for v_tag in tags_p["voltajes"]:
+                    if v_tag in df_final.columns:
+                        fig_v.add_trace(go.Scatter(x=df_final['FECHA'], y=df_final[v_tag], name=v_tag))
+                
+                fig_v.update_layout(title="Variables Eléctricas (Voltajes)", template="plotly_dark", yaxis_title="Voltios (V)")
+                st.plotly_chart(fig_v, use_container_width=True)
+
         else:
-            st.warning("No se encontraron datos para este pozo en los últimos 7 días.")
+            st.error(f"⚠️ No se encontró información en la base de datos para el pozo {pozo_sel} en los últimos 5 días. Verifique que los tags coincidan con la tabla VfiTagRef.")
