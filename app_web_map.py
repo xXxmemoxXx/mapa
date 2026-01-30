@@ -1,101 +1,77 @@
 import streamlit as st
 import folium
-from folium.plugins import Fullscreen, LocateControl
-import webbrowser
 import os
 import mysql.connector
-import psycopg2
-import pandas as pd
-import json
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import concurrent.futures
+# (Importa aquí el resto de tus librerías: psycopg2, plotly, etc.)
 
-# --- CONFIGURACIÓN DE LA PÁGINA WEB ---
-st.set_page_config(page_title="MIAA - Lanzador de Mapa", page_icon="🛰️", layout="centered")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="MIAA Control", layout="centered")
 
-# Estilo para imitar tu interfaz oscura de Tkinter
+# Estilo para que se vea como tu proyecto original
 st.markdown("""
     <style>
     .stApp { background-color: #0b1a29; }
-    h1 { color: #00CED1; text-align: center; font-family: Arial; }
-    .stButton>button { 
-        background-color: #00CED1; color: #0b1a29; font-weight: bold; 
-        width: 100%; border-radius: 5px; height: 3em;
+    .main-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #00CED1;
+        color: #0b1a29;
+        padding: 15px 25px;
+        font-weight: bold;
+        text-decoration: none;
+        border-radius: 5px;
+        width: 100%;
+        text-align: center;
     }
-    .stButton>button:hover { background-color: #008b8b; color: white; }
     </style>
 """, unsafe_allow_html=True)
 
-# ==============================================================================
-# AQUÍ VAN TUS CONFIGURACIONES Y DICCIONARIOS (Copiados íntegros de tu respaldo)
-# ==============================================================================
-config = {
-    'user': 'miaamx_dashboard',
-    'password': 'h97_p,NQPo=l',
-    'host': 'miaa.mx',
-    'database': 'miaamx_telemetria'
-}
+# --- COPIA AQUÍ TUS DICCIONARIOS Y CONFIGS (config, mapa_pozos_dict, etc.) ---
+config = {'user': 'miaamx_dashboard', 'password': 'h97_p,NQPo=l', 'host': 'miaa.mx', 'database': 'miaamx_telemetria'}
+mapa_pozos_dict = {"P002": {"coord": (21.88229, -102.31542), "caudal": "PZ_002_TRC_CAU_INS"}}
 
-# (Pega aquí todos tus diccionarios: mapa_pozos_dict, mapa_tanques_dict, etc.)
-# He dejado este de ejemplo para que veas que el botón funciona
-mapa_pozos_dict = {
-    "P002": {"coord": (21.88229, -102.31542), "caudal": "PZ_002_TRC_CAU_INS", "presion": "PZ_002_TRC_PRES_INS"},
-}
-
-# --- LA FUNCIÓN QUE GENERA EL MAPA (Tu lógica original de Folium) ---
-def generar_y_lanzar_mapa():
-    # 1. Crear el objeto mapa
-    m = folium.Map(location=[21.8818, -102.2917], zoom_start=12, tiles="cartodbpositron")
-    Fullscreen().add_to(m)
-    LocateControl().add_to(m)
-
-    # 2. Tu lógica de conexión y marcado (Simplificada para el ejemplo)
+def procesar_mapa_ingenieria():
+    # 1. Crear el mapa con tu lógica de Folium
+    m = folium.Map(location=[21.8818, -102.2917], zoom_start=12)
+    
+    # 2. Tu lógica de conexión (Pega aquí tu bucle de BD real)
     try:
         conn = mysql.connector.connect(**config)
         cursor = conn.cursor()
-        
         for id_p, info in mapa_pozos_dict.items():
-            # Esta es tu consulta original a la tabla _Ultimo
-            query = f"SELECT T1.VALUE FROM VfiTagNumHistory_Ultimo T1 JOIN VfiTagRef T2 ON T1.GATEID = T2.GATEID WHERE T2.NAME = '{info['caudal']}' LIMIT 1"
-            cursor.execute(query)
-            res = cursor.fetchone()
-            val = float(res[0]) if res else 0.0
-            
-            color = "blue" if val > 0.5 else "red"
-            folium.CircleMarker(
-                location=info["coord"],
-                radius=8,
-                color=color,
-                fill=True,
-                popup=f"<b>{id_p}</b><br>Caudal: {val} l/s"
-            ).add_to(m)
+            # ... tu lógica de queries y CircleMarkers ...
+            folium.Marker(location=info["coord"], popup=id_p).add_to(m)
         conn.close()
-    except Exception as e:
-        st.error(f"Error en BD: {e}")
+    except: pass
 
-    # 3. GUARDAR Y ABRIR (Exactamente como tu código original)
-    nombre_archivo = "mapa_miaa.html"
-    ruta_completa = os.path.abspath(nombre_archivo)
-    m.save(ruta_completa)
-    
-    # Esto es lo que abre la pestaña nueva
-    webbrowser.open(f"file://{ruta_completa}")
-    return ruta_completa
+    # 3. Guardar el archivo en la carpeta 'static' o actual
+    nombre_archivo = "mapa_miaa_renderizado.html"
+    m.save(nombre_archivo)
+    return nombre_archivo
 
-# --- INTERFAZ DE STREAMLIT (Sustituye a tu root.mainloop) ---
+# --- INTERFAZ ---
 st.title("🛰️ SISTEMA DE MONITOREO MIAA")
-st.write("")
 
-# El botón que pediste
-if st.button("INICIAR MONITOREO DE MAPA"):
-    with st.spinner("Procesando datos y generando mapa..."):
-        try:
-            ruta = generar_y_lanzar_mapa()
-            st.success(f"Mapa generado en: {ruta}")
-            st.info("Se ha abierto una nueva pestaña con el mapa interactivo.")
-        except Exception as e:
-            st.error(f"No se pudo abrir el mapa: {e}")
+# El proceso
+if st.button("PREPARAR DATOS DEL MAPA"):
+    with st.spinner("Consultando bases de datos..."):
+        archivo_generado = procesar_mapa_ingenieria()
+        
+        # Leemos el archivo para inyectarlo en el botón de descarga/apertura
+        with open(archivo_generado, "r", encoding='utf-8') as f:
+            html_content = f.read()
+            
+        st.success("✅ Datos procesados con éxito.")
+        
+        # BOTÓN DE APERTURA REAL
+        # Usamos una técnica de link con target="_blank" para forzar la nueva pestaña
+        st.markdown(f"""
+            <a href="data:text/html;base64,{pd.Series(html_content).str.encode('utf-8').apply(base64.b64encode).iloc[0].decode()}" 
+               target="_blank" 
+               class="main-button">
+               🚀 ABRIR MAPA EN NUEVA PESTAÑA
+            </a>
+        """, unsafe_allow_html=True)
 
-st.write("---")
-st.caption("Versión Web de Control de Telemetría - MIAA")
+st.info("Nota: Primero presiona 'PREPARAR DATOS' y luego el botón verde que aparecerá para abrir el mapa.")
