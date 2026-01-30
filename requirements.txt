@@ -1,0 +1,7 @@
+streamlit
+streamlit-folium
+folium
+pandas
+mysql-connector-python
+psycopg2-binary
+plotly
