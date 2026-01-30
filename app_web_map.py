@@ -1,77 +1,76 @@
 import streamlit as st
 import folium
+from folium.plugins import Fullscreen
 import os
+import base64
 import mysql.connector
-# (Importa aquí el resto de tus librerías: psycopg2, plotly, etc.)
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="MIAA Control", layout="centered")
+st.set_page_config(page_title="MIAA - Generador de Mapa", layout="centered")
 
-# Estilo para que se vea como tu proyecto original
+# Estilo para que se vea profesional como tu proyecto
 st.markdown("""
     <style>
     .stApp { background-color: #0b1a29; }
-    .main-button {
+    .btn-abrir {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         background-color: #00CED1;
-        color: #0b1a29;
+        color: #0b1a29 !important;
         padding: 15px 25px;
         font-weight: bold;
         text-decoration: none;
         border-radius: 5px;
         width: 100%;
-        text-align: center;
+        margin-top: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- COPIA AQUÍ TUS DICCIONARIOS Y CONFIGS (config, mapa_pozos_dict, etc.) ---
+# --- TUS CONFIGURACIONES (Pega aquí lo de tu respaldo) ---
 config = {'user': 'miaamx_dashboard', 'password': 'h97_p,NQPo=l', 'host': 'miaa.mx', 'database': 'miaamx_telemetria'}
+
+# PEGA AQUÍ TUS DICCIONARIOS (mapa_pozos_dict, etc.)
 mapa_pozos_dict = {"P002": {"coord": (21.88229, -102.31542), "caudal": "PZ_002_TRC_CAU_INS"}}
 
-def procesar_mapa_ingenieria():
-    # 1. Crear el mapa con tu lógica de Folium
+def generar_mapa_html():
+    # Creamos el mapa con tu lógica
     m = folium.Map(location=[21.8818, -102.2917], zoom_start=12)
+    Fullscreen().add_to(m)
     
-    # 2. Tu lógica de conexión (Pega aquí tu bucle de BD real)
+    # Simulación de tu lógica de BD (aquí va tu bucle real)
     try:
         conn = mysql.connector.connect(**config)
         cursor = conn.cursor()
         for id_p, info in mapa_pozos_dict.items():
-            # ... tu lógica de queries y CircleMarkers ...
+            # ... tu lógica de marcado ...
             folium.Marker(location=info["coord"], popup=id_p).add_to(m)
         conn.close()
-    except: pass
-
-    # 3. Guardar el archivo en la carpeta 'static' o actual
-    nombre_archivo = "mapa_miaa_renderizado.html"
+    except:
+        pass
+        
+    # Guardamos temporalmente
+    nombre_archivo = "mapa_miaa.html"
     m.save(nombre_archivo)
     return nombre_archivo
 
 # --- INTERFAZ ---
-st.title("🛰️ SISTEMA DE MONITOREO MIAA")
+st.title("🛰️ MONITOR DE MAPA MIAA")
 
-# El proceso
-if st.button("PREPARAR DATOS DEL MAPA"):
-    with st.spinner("Consultando bases de datos..."):
-        archivo_generado = procesar_mapa_ingenieria()
+if st.button("🚀 GENERAR MAPA ACTUALIZADO"):
+    with st.spinner("Procesando datos de ingeniería..."):
+        archivo = generar_mapa_html()
         
-        # Leemos el archivo para inyectarlo en el botón de descarga/apertura
-        with open(archivo_generado, "r", encoding='utf-8') as f:
-            html_content = f.read()
+        # Leemos el archivo para convertirlo en un link de apertura
+        with open(archivo, "rb") as f:
+            html_bytes = f.read()
+            b64 = base64.b64encode(html_bytes).decode()
             
-        st.success("✅ Datos procesados con éxito.")
+        st.success("Mapa generado correctamente.")
         
-        # BOTÓN DE APERTURA REAL
-        # Usamos una técnica de link con target="_blank" para forzar la nueva pestaña
-        st.markdown(f"""
-            <a href="data:text/html;base64,{pd.Series(html_content).str.encode('utf-8').apply(base64.b64encode).iloc[0].decode()}" 
-               target="_blank" 
-               class="main-button">
-               🚀 ABRIR MAPA EN NUEVA PESTAÑA
-            </a>
-        """, unsafe_allow_html=True)
+        # ESTO ES LO QUE ABRE LA VENTANA: Un link real de HTML
+        href = f'<a href="data:text/html;base64,{b64}" target="_blank" class="btn-abrir">CLIC AQUÍ PARA ABRIR MAPA EN OTRA PESTAÑA</a>'
+        st.markdown(href, unsafe_allow_html=True)
 
-st.info("Nota: Primero presiona 'PREPARAR DATOS' y luego el botón verde que aparecerá para abrir el mapa.")
+st.info("Nota: Al dar clic en el botón verde, se abrirá tu mapa con toda la configuración de Folium en una pestaña nueva.")
